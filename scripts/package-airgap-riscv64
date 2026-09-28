@@ -24,50 +24,60 @@
 set -e
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/version.sh
+# shellcheck disable=SC1091
 . ./scripts/version.sh
 
 export ARCH=riscv64
 DIST=dist/artifacts
 mkdir -p "${DIST}"
-MIRROR=${MIRROR:-docker.m.daocloud.io}
+MIRROR=${MIRROR-docker.m.daocloud.io}
 
-# 从镜像加速(或官方源)拉 riscv64 镜像并重标为 k3s 引用名
-pull_and_tag() {
-    local upstream="$1" target="$2"
-    if [ -n "${MIRROR}" ]; then
-        docker pull --platform linux/riscv64 "${MIRROR}/${upstream}"
-        docker tag "${MIRROR}/${upstream}" "${target}"
-    else
-        docker pull --platform linux/riscv64 "${upstream}"
-        docker tag "${upstream}" "${target}"
-    fi
-}
-
-pull_and_tag library/busybox:1.36.1                docker.io/rancher/mirrored-library-busybox:1.36.1
-
-# pause: 无官方 riscv64 变体，用 busybox 自建等效沙箱镜像（需 buildx + QEMU 仿真）
+# 通过 buildx 导出单架构 BusyBox。直接 pull --platform 后重标在使用
+# containerd image store 的 Docker 版本中可能保留不完整的 manifest list，
+# 导致后续 docker save 找不到平台内容。
 BUILDCTX=$(mktemp -d)
 trap 'rm -rf "${BUILDCTX}"' EXIT
 if [ -n "${MIRROR}" ]; then FROM_IMG="${MIRROR}/library/busybox:1.36.1"; else FROM_IMG="busybox:1.36.1"; fi
-cat > "${BUILDCTX}/Dockerfile" <<EOF
+cat > "${BUILDCTX}/Dockerfile.busybox" <<EOF
+FROM ${FROM_IMG}
+EOF
+docker buildx build --platform linux/riscv64 \
+    -t docker.io/rancher/mirrored-library-busybox:1.36.1 \
+    --load -f "${BUILDCTX}/Dockerfile.busybox" "${BUILDCTX}" >/dev/null
+
+# pause: 无官方 riscv64 变体，用 busybox 自建等效沙箱镜像（需 buildx + QEMU 仿真）
+cat > "${BUILDCTX}/Dockerfile.pause" <<EOF
 FROM ${FROM_IMG}
 CMD ["sleep", "infinity"]
 EOF
-docker buildx build --platform linux/riscv64 -t docker.io/rancher/mirrored-pause:3.6 --load "${BUILDCTX}" >/dev/null
+docker buildx build --platform linux/riscv64 \
+    -t docker.io/rancher/mirrored-pause:3.6 \
+    --load -f "${BUILDCTX}/Dockerfile.pause" "${BUILDCTX}" >/dev/null
+
+IMAGES=(
+    docker.io/rancher/local-path-provisioner:v0.0.24
+    docker.io/rancher/mirrored-coredns-coredns:1.10.1
+    docker.io/rancher/mirrored-library-busybox:1.36.1
+    docker.io/rancher/mirrored-library-traefik:2.10.5
+    docker.io/rancher/mirrored-pause:3.6
+    docker.io/rancher/klipper-helm:v0.8.2-build20230815
+    docker.io/rancher/klipper-lb:v0.4.4
+    docker.io/rancher/mirrored-metrics-server:v0.6.3
+)
+
+for image in "${IMAGES[@]}"; do
+    image_arch=$(docker image inspect --format '{{.Architecture}}' "${image}")
+    if [ "${image_arch}" != "riscv64" ]; then
+        echo "${image} has architecture ${image_arch}, expected riscv64" >&2
+        exit 1
+    fi
+done
 
 # 保存 + 压缩（同官方格式：.tar / .tar.zst / .tar.gz）
 # 注：local-path/coredns/traefik/klipper-helm/klipper-lb/metrics-server 由发布 workflow
 # 预构建（scripts/riscv64-images/ 下 Dockerfile.riscv64），此处直接 save。
-docker save \
-    docker.io/rancher/local-path-provisioner:v0.0.24 \
-    docker.io/rancher/mirrored-coredns-coredns:1.10.1 \
-    docker.io/rancher/mirrored-library-busybox:1.36.1 \
-    docker.io/rancher/mirrored-library-traefik:2.10.5 \
-    docker.io/rancher/mirrored-pause:3.6 \
-    docker.io/rancher/klipper-helm:v0.8.2-build20230815 \
-    docker.io/rancher/klipper-lb:v0.4.4 \
-    docker.io/rancher/mirrored-metrics-server:v0.6.3 \
-    -o "${DIST}/k3s-airgap-images-${ARCH}.tar"
+docker save "${IMAGES[@]}" -o "${DIST}/k3s-airgap-images-${ARCH}.tar"
 
 zstd --no-progress -T0 -16 -f --long=25 "${DIST}/k3s-airgap-images-${ARCH}.tar" \
     -o "${DIST}/k3s-airgap-images-${ARCH}.tar.zst"

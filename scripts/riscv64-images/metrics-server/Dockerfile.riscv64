@@ -11,10 +11,12 @@ FROM --platform=$BUILDPLATFORM ${GOLANG} as build
 WORKDIR /go/src/sigs.k8s.io/metrics-server
 ARG PROXY=
 ARG GOPROXY=https://proxy.golang.org,direct
+ARG SOURCE_COMMIT=a938798c8acf4a27215e780fd98aa57fe16d46a5
 ENV http_proxy=$PROXY https_proxy=$PROXY HTTP_PROXY=$PROXY HTTPS_PROXY=$PROXY \
     GOPROXY=$GOPROXY
 RUN apk add -U --no-cache git make ca-certificates \
- && git -c http.sslVerify=false clone --depth 1 --branch v0.6.3 https://github.com/kubernetes-sigs/metrics-server . \
+ && git clone --depth 1 --branch v0.6.3 https://github.com/kubernetes-sigs/metrics-server . \
+ && test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}" \
  && make metrics-server ARCH=riscv64
 
 FROM --platform=$TARGETPLATFORM alpine:3.20
