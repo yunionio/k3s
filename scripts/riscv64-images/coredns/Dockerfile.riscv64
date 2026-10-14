@@ -8,10 +8,12 @@ FROM --platform=$BUILDPLATFORM ${GOLANG} as build
 WORKDIR /go/src/github.com/coredns/coredns
 ARG PROXY=
 ARG GOPROXY=https://proxy.golang.org,direct
+ARG SOURCE_COMMIT=055b2c31a9cf28321734e5f71613ea080d216cd3
 ENV http_proxy=$PROXY https_proxy=$PROXY HTTP_PROXY=$PROXY HTTPS_PROXY=$PROXY \
     GOPROXY=$GOPROXY
 RUN apk add -U --no-cache git ca-certificates make \
- && git -c http.sslVerify=false clone --depth 1 --branch v1.10.1 https://github.com/coredns/coredns . \
+ && git clone --depth 1 --branch v1.10.1 https://github.com/coredns/coredns . \
+ && test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}" \
  && CGO_ENABLED=0 GOARCH=riscv64 go build -o coredns .
 
 FROM --platform=$TARGETPLATFORM alpine:3.20

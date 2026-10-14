@@ -89,7 +89,7 @@ jobs:
       #    pause 自建逻辑，7 个自建镜像由上文预构建，见 scripts/package-airgap-riscv64）
       - name: Package airgap images
         run: |
-          MIRROR= ./scripts/package-airgap-riscv64
+          env MIRROR= ./scripts/package-airgap-riscv64
           ls -lh dist/artifacts/k3s-airgap-images-riscv64*
 
       # 4) 镜像清单（同官方 k3s-images.txt，8 镜像全量，与官方 v1.28.5+k3s1 一致）

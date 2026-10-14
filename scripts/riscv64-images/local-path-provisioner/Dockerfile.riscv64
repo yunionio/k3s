@@ -8,10 +8,12 @@ FROM --platform=$BUILDPLATFORM ${GOLANG} as build
 WORKDIR /go/src/github.com/rancher/local-path-provisioner
 ARG PROXY=
 ARG GOPROXY=https://proxy.golang.org,direct
+ARG SOURCE_COMMIT=97e0501428f0a5bcac49ecd0bfdb051797c4a6c5
 ENV http_proxy=$PROXY https_proxy=$PROXY HTTP_PROXY=$PROXY HTTPS_PROXY=$PROXY \
     GOPROXY=$GOPROXY
 RUN apk add -U --no-cache git ca-certificates \
- && git -c http.sslVerify=false clone --depth 1 --branch v0.0.24 https://github.com/rancher/local-path-provisioner . \
+ && git clone --depth 1 --branch v0.0.24 https://github.com/rancher/local-path-provisioner . \
+ && test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}" \
  && CGO_ENABLED=0 GOARCH=riscv64 go build -o bin/local-path-provisioner .
 
 FROM --platform=$TARGETPLATFORM alpine:3.20
